@@ -1,0 +1,291 @@
+#!/bin/bash
+
+# Color Code for tput:
+#
+#    0 – Black.
+#    1 – Red.
+#    2 – Green.
+#    3 – Yellow.
+#    4 – Blue.
+#    5 – Magenta.
+#    6 – Cyan.
+#    7 – White.
+
+main () {
+
+    #----------------------------------------------------------------------------------------------------
+    ## check for and if needed install fio
+    if ! [ -x "$(command -v fio)" ]; then
+	tput setaf 1
+    printf "%b\n" "FIO is required but not found"
+    printf "%b\n"
+    tput sgr0
+    printf "%b\n" "Would you like to try to install it now?"
+    printf "%b\n"
+
+    read -r -n 1 -p "[y/N] " response
+    case "${response}" in
+        [yY])
+            sudo apt install fio && exec $(readlink -f "$0")
+            ;;
+        *)
+
+            exit
+            ;;
+    esac
+
+    fi
+
+
+    # This is a NON-destructive test. All data on the partition is safe.
+    # Change this path variable to a mounted "Read / Write" area on your NVME, SD, SATA partition thats under test.
+	################################################################################################
+	################################################################################################
+    ################################################################################################
+    ################################################################################################
+    ################################################################################################
+    #																							   #
+    #																							   #
+    #block_dev=/media/rock/STORAGE  #  <----- Do Not Use Trailing Slash /						   #
+	block_dev=/media/rock/ubt-bionic/home/rock
+    #																							   #
+    #																							   #
+    ################################################################################################
+    ################################################################################################
+    ################################################################################################
+    ################################################################################################
+    ################################################################################################
+    if [ ! -d "$block_dev" ]; then
+        clear
+		tput setaf 2
+        printf "%b\n\n"
+        printf "%b\n" " "$block_dev" " "\n"
+		tput setaf 1
+        printf "%b\n" "Not a valid directory.
+You must edit this file and assign a valid location to the variable block_dev"
+		printf "%b\n\n"
+        printf "%b\n" "Location must be readable / writable"
+		tput sgr0
+        printf "%b\n"
+        exit
+    fi
+
+    # Set the directory where the test files will be stored
+
+    Working_Dir="$block_dev"/FIO-Test
+
+    # Test to see if the working directory already exists, if not create it
+
+    if [ ! -d "$Working_Dir" ]; then
+        mkdir "$Working_Dir"
+    fi
+
+    Test_Filename="$Working_Dir"/FIO-Test-File
+
+    #----------------------------------------------------------------------------------------------------
+
+    # Find out the block type. NVMe, eMMC(uSD) or Sata and call function nvme or emmc
+    DISK_TYPE=$(findmnt -n -o SOURCE --target "$block_dev")
+    if [[ "$DISK_TYPE" = *"nvme"* ]]; then
+        SIZE=10G
+        DISK_NAME=NVMe
+        clear
+        nvme
+    fi
+
+    if [[ "$DISK_TYPE" = *"mmc"* ]]; then
+        SIZE=1G
+        DISK_NAME=eMMC
+        clear
+        emmc
+    fi
+
+    if [[ "$DISK_TYPE" = *"sd"* ]]; then
+        SIZE=5G
+        if [[ $(findmnt -A --target "$block_dev" | grep vfat) ]]; then
+            SIZE=3G
+        fi
+        DISK_NAME=SATA
+        clear
+        sata
+    fi
+
+
+    tput sgr0 # Reset color to terminal default
+
+    SeqW="$Working_Dir"/fio-seq-write-test__"$DISK_NAME"__.txt
+    SeqR="$Working_Dir"/fio-seq-read-test__"$DISK_NAME"__.txt
+    RandR="$Working_Dir"/fio-rand-read-test__"$DISK_NAME"__.txt
+    RandW="$Working_Dir"/fio-rand-write-test__"$DISK_NAME"__.txt
+
+
+    # Begin Setup Sequential Write Banner
+
+    printf "%s\n" "---------------------------------------------------------------------------------"
+    tput setaf 1; printf "SEQUENTIAL WRITE PASS"; tput setaf 2; printf "\t%s\n" "File Size ="$SIZE" ioengine=libaio bs=1M";
+    tput sgr0; # Reset color to terminal default
+
+    # End Setup Sequential Write Banner
+
+    # Begin Sequential Write Pass
+    tput sc
+    printf "%b" "Running Test, Please Wait.""\n"
+    tput setaf 3 # Change Color Of Output To Yellow
+    sudo fio --name=writefile --size="$SIZE" --filesize="$SIZE" \
+        --filename="$Test_Filename" --bs=1M --nrfiles=1 \
+        --direct=1 --sync=0 --randrepeat=0 --rw=write --refill_buffers --end_fsync=1 \
+        --iodepth=200 --ioengine=libaio --output "$SeqW" >/dev/null
+    sleep .5
+    tput rc
+    tput ed
+    printf "%b" "Sequential Write: "; grep -e "write: IOPS=" "$SeqW" | awk '{sub(",", "", $2); print}' | awk '{print "\011",$2,$3,$4}';
+    printf "%s\n" "---------------------------------------------------------------------------------"
+    # End Sequential Write Pass
+
+
+    # Begin Setup Sequential Read Banner
+    tput sgr0;
+    tput setaf 1; printf "SEQUENTIAL READ PASS"; tput setaf 2; printf "\t%s\n" "File Size ="$SIZE" ioengine=libaio bs=1M"
+    tput sgr0;
+    # End Setup Sequential Read Banner Banner
+
+    # Begin Sequential Read Pass
+    tput sc
+    printf "%b" "Running Test, Please Wait.""\n"
+    tput setaf 3; # Change Color Of Output To Yellow
+    sudo fio --name=writefile --size="$SIZE" --filesize="$SIZE" \
+        --filename="$Test_Filename" --bs=1M --nrfiles=1 \
+        --direct=1 --sync=0 --randrepeat=0 --rw=read --refill_buffers --end_fsync=1 \
+        --iodepth=200 --ioengine=libaio --output "$SeqR" >/dev/null
+    sleep .5
+    tput rc
+    tput ed
+    printf "%b" "Sequential Read: "; grep -e "read: IOPS=" "$SeqR" | awk '{sub(",", "", $2); print}' | awk '{print "\011",$2,$3,$4}';
+    printf "%s\n" "---------------------------------------------------------------------------------"
+    # End Sequential Read Pass
+
+    # Begin Setup Random Read Banner
+    tput sgr0;
+    tput setaf 1; printf "RAND READ PASS"; tput setaf 2; printf "\t\t%s\n" "File Size ="$SIZE" ioengine=libaio blocksize=4k 30 Seconds"
+    tput sgr0;
+    # End Setup Random Read Banner
+
+    # Begin Random Read Pass
+    tput sc
+    printf "%b" "Running Test, Please Wait.""\n"
+    tput setaf 3; # Change Color Of Output To Yellow
+    sudo fio --time_based --name=benchmark --size="$SIZE" --runtime=30 \
+        --filename="$Test_Filename" --ioengine=libaio --randrepeat=0 \
+        --iodepth=200 --direct=1 --invalidate=1 --verify=0 --verify_fatal=0 \
+        --numjobs=4 --rw=randread --blocksize=4k --group_reporting --output "$RandR" >/dev/null
+    sleep .5
+    tput rc
+    tput ed
+    printf "%b" "Random Read: "; grep -e "read: IOPS=" "$RandR" | awk '{sub(",", "", $2); print}' | awk '{print "\011\011",$2,$3,$4}';
+    printf "%s\n" "---------------------------------------------------------------------------------"
+    # End Random Read Pass
+
+    # Begin Setup Random Write Banner
+    tput sgr0; # Reset color to terminal default
+    tput setaf 1; printf "RAND WRITE PASS"; tput setaf 2; printf "\t\t%s\n" "File Size ="$SIZE" ioengine=libaio blocksize=4k 30 Seconds"
+    tput sgr0; # Reset color to terminal default
+    # End Setup Random Write Banner
+
+    # Begin Setup Random Write
+    tput sc
+    printf "%b" "Running Test, Please Wait.""\n"
+    tput setaf 3 # Change Color Of Output To Yellow
+    sudo fio --time_based --name=benchmark --size="$SIZE" --runtime=30 \
+        --filename="$Test_Filename" --ioengine=libaio --randrepeat=0 \
+        --iodepth=200 --direct=1 --invalidate=1 --verify=0 --verify_fatal=0 \
+        --numjobs=4 --rw=randwrite --blocksize=4k --group_reporting --output "$RandW" >/dev/null
+    sleep .5
+    tput rc
+    tput ed
+    printf "%b" "Random Write: "; grep -e "write: IOPS=" "$RandW" | awk '{sub(",", "", $2); print}' | awk '{print "\011\011",$2,$3,$4}';
+    printf "%s\n" "---------------------------------------------------------------------------------"
+    tput sgr0; # Reset color to terminal default
+    # End Setup Random Write
+
+    # Inform user that the test file still exists and list is size and method to delete
+    if [ -f "$Test_Filename" ]
+    then
+        sudo rm "$Test_Filename"
+    fi
+
+    if [ -f "$Test_Filename" ]
+    then
+        printf "%b" " Error... Unable to delete "$Test_Filename" "
+    fi
+
+    printf "\n"
+    tput smso; printf "%b\n\n" "Test files still exist"
+    tput sgr0;
+    if [ -f "$Test_Filename" ]
+    then
+        ls -lh "$Test_Filename" | awk '{print $5,"\040"$9}'
+    fi
+    ls -lh "$SeqW" | awk '{print $5,$9}'
+    ls -lh "$SeqR" | awk '{print $5,$9}'
+    ls -lh "$RandR" | awk '{print $5,$9}'
+    ls -lh "$RandW" | awk '{print $5,$9}'
+    printf "\n"
+    tput setaf 2; printf "%s" "You can continue to \"reuse / overwrite\" them or delete them like "; printf "\n\n"; tput setaf 1; printf "%s\n" "sudo rm "$Working_Dir"/*"
+    tput sgr0;
+    printf "\n"
+
+    # End Test and main function
+}
+
+# Run function if block device is NVMe
+nvme () {
+    tput setaf 3;
+    cat << "EOF"
+ __  _   _   _   __ __   ___
+|  \| | | \ / | |  V  | | __|
+| | ' | `\ V /' | \_/ | | _|
+|_|\__|   \_/   |_| |_| |___| Detected, Setting Test Filesize to 10GB
+
+EOF
+    tput setaf 0;
+}
+
+# Run function if block device is eMMC(uSD)
+emmc () {
+    tput setaf 3;
+    cat << "EOF"
+ ___   __ __   __ __    ___
+| __| |  V  | |  V  |  / _/
+| _|  | \_/ | | \_/ | | \__
+|___| |_| |_| |_| |_|  \__/  Detected, Setting Test Filesize to 1GB
+
+EOF
+    tput setaf 0;
+}
+# Run function if block device is SATA
+sata () {
+    tput setaf 3;
+    cat << "EOF"
+  __    __    _____    _
+/' _/  /  \  |_   _|  /  \
+`._`. | /\ |   | |   | /\ |
+|___/ |_||_|   |_|   |_||_|
+
+EOF
+    printf "%b\n" "Detected, Setting Test Filesize to "${SIZE}""
+    tput setaf 0;
+}
+
+ctrl_c() {
+    printf "%b\n\n" "  CTRL-C Detected.. Aborting Test....Removing test files"
+    printf "%s\n%s\n%s\n%s\n" ""$SeqW"" ""$SeqR"" ""$RandR"" ""$RandW""
+    if [ -f "$Test_Filename" ]
+    then
+        sudo rm "$Test_Filename"
+        sudo rm "$SeqW" "$SeqR" "$RandR" "$RandW" 2>/dev/null
+        #sudo rm "$Working_Dir"/*
+    fi
+    exit
+}
+trap ctrl_c INT
+main
